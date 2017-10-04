@@ -1,4 +1,4 @@
-#!/bin/bash -xe
+#!/bin/bash -e
 # Copyright (c) 2017 by AIS
 # Copyright (c) 2015 by Roderick W. Smith
 # Licensed under the terms of the GPL v3

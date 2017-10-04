@@ -2,3 +2,6 @@
 	path = efitools
 	url = git://git.kernel.org/pub/scm/linux/kernel/git/jejb/efitools.git
     ignore = dirty
+[submodule "shim"]
+	path = shim
+	url = https://github.com/tklengyel/shim

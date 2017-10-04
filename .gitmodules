@@ -1,0 +1,4 @@
+[submodule "efitools"]
+	path = efitools
+	url = git://git.kernel.org/pub/scm/linux/kernel/git/jejb/efitools.git
+    ignore = dirty

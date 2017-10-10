@@ -1,0 +1,104 @@
+From 5ab4e733ab21fd623cb7bd00ea456f40d414808d Mon Sep 17 00:00:00 2001
+From: Tamas K Lengyel <lengyelt@ainfosec.com>
+Date: Tue, 10 Oct 2017 15:09:23 -0600
+Subject: [PATCH] Make LockDown messages more human readable
+
+---
+ LockDown.c | 30 +++++++++++++++++++++++-------
+ 1 file changed, 23 insertions(+), 7 deletions(-)
+
+diff --git a/LockDown.c b/LockDown.c
+index 29df9de..e57bc6e 100644
+--- a/LockDown.c
++++ b/LockDown.c
+@@ -13,11 +13,13 @@
+ #include "KEK.h"
+ #include "DB.h"
+ 
++#define WAITTIME 25000000
++
+ EFI_STATUS
+ efi_main (EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
+ {
+ 	EFI_STATUS efi_status;
+-	UINT8 SecureBoot, SetupMode;
++	UINT8 SecureBoot = 0, SetupMode = 0;
+ 	UINTN DataSize = sizeof(SetupMode);
+ 
+ 	InitializeLib(image, systab);
+@@ -26,11 +28,14 @@ efi_main (EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
+ 
+ 	if (efi_status != EFI_SUCCESS) {
+ 		Print(L"No SetupMode variable ... is platform secure boot enabled?\n");
++        systab->BootServices->Stall(WAITTIME);
+ 		return EFI_SUCCESS;
+ 	}
+ 
+ 	if (!SetupMode) {
+ 		Print(L"Platform is not in Setup Mode, cannot install Keys\n");
++		Print(L"Please enter the firmware setup and delete all SecureBoot keys\n");
++        systab->BootServices->Stall(WAITTIME);
+ 		return EFI_SUCCESS;
+ 	}
+ 
+@@ -44,6 +49,7 @@ efi_main (EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
+ 				     KEK_auth_len, KEK_auth);
+ 	if (efi_status != EFI_SUCCESS) {
+ 		Print(L"Failed to enroll KEK: %d\n", efi_status);
++        systab->BootServices->Stall(WAITTIME);
+ 		return efi_status;
+ 	}
+ 	Print(L"Created KEK Cert\n");
+@@ -55,6 +61,7 @@ efi_main (EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
+ 				     DB_auth_len, DB_auth);
+ 	if (efi_status != EFI_SUCCESS) {
+ 		Print(L"Failed to enroll db: %d\n", efi_status);
++        systab->BootServices->Stall(WAITTIME);
+ 		return efi_status;
+ 	}
+ 	Print(L"Created db Cert\n");
+@@ -78,6 +85,7 @@ efi_main (EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
+ 	
+ 	if (efi_status != EFI_SUCCESS) {
+ 		Print(L"Failed to enroll PK: %d\n", efi_status);
++        systab->BootServices->Stall(WAITTIME);
+ 		return efi_status;
+ 	}
+ 	Print(L"Created PK Cert\n");
+@@ -85,19 +93,27 @@ efi_main (EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
+ 	efi_status = RT->GetVariable(L"SetupMode", &GV_GUID, NULL, &DataSize, &SetupMode);
+ 	if (efi_status != EFI_SUCCESS) {
+ 		Print(L"Failed to get SetupMode variable: %d\n", efi_status);
++        systab->BootServices->Stall(WAITTIME);
+ 		return efi_status;
+ 	}
+ 	Print(L"Platform is in %s Mode\n", SetupMode ? L"Setup" : L"User");
+ 
+-	/* finally, check that SecureBoot is enabled */
++    if ( SetupMode ) {
++        Print(L"Failed to properly load SecureBoot keys, system is still in SetupMode!\n");
++        systab->BootServices->Stall(WAITTIME);
++        return efi_status;
++    }
++
++    Print(L"SecureBoot keys have been properly loaded!\n");
++    Print(L"It is now safe to restart the machine.\n");
+ 
++    /* finally, check that SecureBoot is enabled */
+ 	efi_status = RT->GetVariable(L"SecureBoot", &GV_GUID, NULL, &DataSize, &SecureBoot);
+ 
+-	if (efi_status != EFI_SUCCESS) {
+-		Print(L"Failed to get SecureBoot variable: %d\n", efi_status);
+-		return efi_status;
++	if (efi_status != EFI_SUCCESS || !SecureBoot) {
++	    Print(L"Verify that SecureBoot is enabled in the BIOS Setup!\n");
+ 	}
+-	Print(L"Platform %s set to boot securely\n", SecureBoot ? L"is" : L"is not");
+ 
+-	return EFI_SUCCESS;
++    systab->BootServices->Stall(WAITTIME);
++    return efi_status;
+ }
+-- 
+2.11.0
+

@@ -8,7 +8,6 @@ read NAME
 
 mkdir -p keys
 
-git submodule update --init efitools
 cd efitools
 
 make cert-to-efi-sig-list

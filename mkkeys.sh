@@ -36,9 +36,11 @@ fi
 touch noPK.esl
 
 ./sign-efi-sig-list -t "$(date --date='1 second' +'%Y-%m-%d %H:%M:%S')" -k PK.key -c PK.crt PK PK.esl PK.auth
-./sign-efi-sig-list -t "$(date --date='1 second' +'%Y-%m-%d %H:%M:%S')" -k PK.key -c PK.crt PK noPK.esl noPK.auth
 ./sign-efi-sig-list -t "$(date --date='1 second' +'%Y-%m-%d %H:%M:%S')" -k PK.key -c PK.crt KEK KEK.esl KEK.auth
 ./sign-efi-sig-list -t "$(date --date='1 second' +'%Y-%m-%d %H:%M:%S')" -k KEK.key -c KEK.crt db DB.esl DB.auth
+
+# The noPK.auth file needs to have a later timestamp then PK otherwise some firmwares will reject it
+./sign-efi-sig-list -t "$(date --date='2 second' +'%Y-%m-%d %H:%M:%S')" -k PK.key -c PK.crt PK noPK.esl noPK.auth
 
 chmod 0600 *.key
 

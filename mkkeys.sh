@@ -51,6 +51,9 @@ mv *.crt ../keys
 mv *.esl ../keys
 mv *.auth ../keys
 mv myGUID.txt ../keys
+mv PK.h ../keys
+mv KEK.h ../keys
+mv DB.h ../keys
 mv LockDown-signed.efi ../keys
 
 cd ..

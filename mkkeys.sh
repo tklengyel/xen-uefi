@@ -48,6 +48,7 @@ sbsign --key DB.key --cert DB.crt --output LockDown-signed.efi LockDown.efi 2>/d
 
 mv *.key ../keys
 mv *.crt ../keys
+mv *.cer ../keys
 mv *.esl ../keys
 mv *.auth ../keys
 mv myGUID.txt ../keys

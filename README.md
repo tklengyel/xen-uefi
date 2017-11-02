@@ -204,7 +204,7 @@ kernel=linux-signed.efi
 
 The config file will only specify the name of the dom0 kernel image, which will also need to be signed with the SHIM key.
 
-# dom0 setup
+# 7. dom0 setup
 ## Compile Linux
 -------------------------------
 To ensure the the initial ramdisk gets validated during boot it has be compiled into the Linux image itself. This requires first generating the kernel image and the corresponding ramdisk, then re-compiling the kernel image with the ramdisk embedded. The easiest way to do that is by creating the Debian packages for the kernel and actually installing the package to trigger the Debian initramfs hooks.

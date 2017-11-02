@@ -1,15 +1,15 @@
 This repository contains tools and instructions for installing Xen and dom0 with UEFI/SecureBoot such that all critical components of Xen and the dom0 kernel get SecureBoot verified and measured into the TPM.
 
 # Table of Contents
-1. [Generating SecureBoot signing keys](#generating-secureboot-signing-keys)
-2. [Placing the system into SecureBoot SetupMode](#placing-the-system-into-secureboot-setupmode)
-3. [Installing SecureBoot Keys](#installing-secureboot-keys)
-4. [Signing binaries with the SecureBoot keys](#signing-binaries-with-the-secureboot-keys)
-5. [Shim setup](#shim-setup)
-6. [Xen setup](#xen-setup)
-7. [dom0 setup](#dom0-setup)
+1. [Generating SecureBoot signing keys](#section-1)
+2. [Placing the system into SecureBoot SetupMode](#section-2)
+3. [Installing SecureBoot Keys](#section-3)
+4. [Signing binaries with the SecureBoot keys](#section-4)
+5. [Shim setup](#section-5)
+6. [Xen setup](#section-6)
+7. [dom0 setup](#section-7)
 
-# 1. Generating SecureBoot signing keys
+# 1. Generating SecureBoot signing keys <a name="section-1"></a>
 
 ## Precautions to be taken
 ------------------------------
@@ -26,7 +26,7 @@ cd uefi-sb
 
 The generated keys will be located in the `keys` folder.
 
-# 2. Placing the system into SecureBoot SetupMode
+# 2. Placing the system into SecureBoot SetupMode <a name="section-2"></a> 
 ----------------------------------
 In all cases, the system has to be first switched to UEFI boot before SecureBoot can be enabled. Entering SecureBoot `SetupMode` is then required to be able to load custom SecureBoot Keys. Some firmwares (for example Toshiba) ship with SecureBoot enabled but in `SetupMode` so that the user can replace the keys manually. Other firmwares (for example Dell) provide an interface in their BIOS Setup pages to enter "Custom key mode", also known as "Expert key management" on some firmwares.
 
@@ -55,7 +55,7 @@ Start `KeyTool` from a USB device or from the `ESP` partition.
 
 The system should now be in `SetupMode` again. 
 
-# 3. Installing SecureBoot keys
+# 3. Installing SecureBoot keys <a name="section-3"></a> 
 ## Installing SecureBoot keys with LockDown.efi
 ------------------------------
 LockDown.efi is a minimal EFI application that contains the SecureBoot certificates embedded in the application itself. When executed, it will automatically load the keys into their respective SecureBoot key-slot.
@@ -103,7 +103,7 @@ Make sure to load the keys in the following order (loading PK will take the syst
 3.  PK
 
 
-# 4. Signing binaries with the SecureBoot keys
+# 4. Signing binaries with the SecureBoot keys <a name="section-4"></a> 
 ---------------------------------
 In order to allow UEFI applications to execute on a SecureBoot enabled system, the application needs to be signed by a private key that was loaded into the firmware. Signing can be performed with the `sbsign` tool. Signing an application with sbsign as a straight forward process:
 
@@ -124,7 +124,7 @@ If shim is executed from the location EFI/BOOT/BOOTX64.EFI and FBX64.EFI is pres
 Shim is used to cause Xen to verify DOM0 before launching it.  Shim installs an EFI protocol on the system that can be used to verify images loaded by code executed after shim.  If this protocol is present on the system, Xen will use it to verify DOM0 and halt if the verification fails.
 
 
-# 5. Shim setup
+# 5. Shim setup <a name="section-5"></a> 
 ## Compile and sign SHIM
 ------------------------------
 We will use a slightly modified version of the SHIM that can keep the `.reloc` section of the image it loads in memory (ie. `KEEP_DISCARDABLE_RELOC=1`). This is necessary for Xen as Xen looks for the `.reloc` section but by default the SHIM doesn't copy it if it's marked discardable.
@@ -161,7 +161,7 @@ Adding a boot entry can be performed with:
 efibootmgr -c -d /dev/sda -p 1 -w -L shim -l \EFI\BOOT\BOOTX64.EFI
 ```
 
-# 6. Setup Xen
+# 6. Setup Xen <a name="section-6"></a> 
 ## Compile Xen with required config options
 By default the Xen Security Modules (XSM) policy and the Xen command-line arguments are being specified by the bootloader (GRUB). When booted in UEFI mode these options can be specified in the UEFI config file. However, in that case neither would get verified and thus the SecureBoot trust-chain would get broken. Thus it is necessary to compile both into the Xen UEFI binary itself.
 
@@ -204,7 +204,7 @@ kernel=linux-signed.efi
 
 The config file will only specify the name of the dom0 kernel image, which will also need to be signed with the SHIM key.
 
-# 7. dom0 setup
+# 7. dom0 setup <a name="section-7"></a> 
 ## Compile Linux
 -------------------------------
 To ensure the the initial ramdisk gets validated during boot it has be compiled into the Linux image itself. This requires first generating the kernel image and the corresponding ramdisk, then re-compiling the kernel image with the ramdisk embedded. The easiest way to do that is by creating the Debian packages for the kernel and actually installing the package to trigger the Debian initramfs hooks.

@@ -20,7 +20,7 @@ Private keys generated for SecureBoot need to be protected at all times. For thi
 ```
 apt-get install make gcc libssl1.0-dev git gnu-efi sbsigntool libfile-slurp-perl
 git clone https://github.com/tklengyel/xen-uefi --recursive
-cd uefi-sb
+cd xen-uefi
 ./mkkeys.sh
 ```
 
@@ -42,7 +42,7 @@ After power-on or reboot, press F2 to enter `BIOS Setup`. Enable UEFI mode. Loca
 Once a platform is taken out of `SetupMode` with custom-keys, the platform can re-enter `SetupMode` with use of the generated `noPK.auth` file and `KeyTool`.
 
 ```
-cd uefi-sb/efitools
+cd xen-uefi/efitools
 make KeyTool.efi
 ```
 
@@ -63,7 +63,7 @@ LockDown.efi is a minimal EFI application that contains the SecureBoot certifica
 By default LockDown.efi does not wait after the keys have been successfully loaded or in case an error occurred. There is a patch in the git repository that adds a bit of wait time so messages can be read of the screen when using the tool. To apply the patch:
 
 ```
-cd uefi-sb/efitools
+cd xen-uefi/efitools
 patch -p1 < ../efitools-lockdown-messages.patch
 ```
 
@@ -93,7 +93,7 @@ This section is largely based on the [Gentoo Wiki](https://wiki.gentoo.org/wiki/
 One of the tools that is included with efitools is `KeyTool.efi`, a UEFI application that can be used to load SecureBoot keys into the firmware, even if the firmware itself doesn't provide a screen to do so. The `KeyTool.efi` file can be copied either onto the `ESP` partition directly, or loaded onto a FAT formatted USB drive (with the path `/EFI/BOOT/BOOTX64.efi`).
 
 ```
-cd uefi-sb/efitools
+cd xen-uefi/efitools
 make KeyTool.efi
 ```
 
@@ -136,7 +136,7 @@ Make sure the SecureBoot keys have been generated already as described above..
 For compiling the SHIM it must have access to `SHIM.cer` which will be compiled into the binary. Signing the final binary can be performed on a separate machine that holds the SecureBoot keys.
 
 ```
-cd uefi-sb/shim
+cd xen-uefi/shim
 make EFI_PATH=/usr/lib VENDOR_CERT_FILE=../keys/SHIM.cer KEEP_DISCARDABLE_RELOC=1 DEFAULT_LOADER=xen-signed.efi
 ```
 
@@ -178,7 +178,7 @@ CONFIG_CMDLINE="console=com1 dom0_mem=min:420M,max:420M,420M com1=115200,8n1,pci
 CONFIG_CMDLINE_OVERRIDE=y
 ```
 
-A sample configuration file can be found in the git repository at `uefi-sb/xen-4.9-config`.
+A sample configuration file can be found in the git repository at https://github.com/tklengyel/xen-uefi/blob/master/xen-4.9-config.
 
 
 ## Signing Xen with the SHIM key
@@ -255,7 +255,7 @@ There is an example config file in the git repository as well that has the optio
 git clone https://github.com/tklengyel/xen-uefi
 wget https://git.kernel.org/torvalds/t/linux-4.14-rc3.tar.gz
 tar xvf linux-4.14-rc3.tar.gz
-cp uefi-sb/config-4.14.0 .config
+cp xen-uefi/config-4.14.0 .config
 make -j8 deb-pkg
 sudo dpkg -i ../linux-image-4.14.0-rc3_4.14.0-rc3-1_amd64.deb
 mkdir initramfs

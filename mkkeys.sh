@@ -22,12 +22,8 @@ openssl x509 -in KEK.crt -out KEK.cer -outform DER
 openssl x509 -in DB.crt -out DB.cer -outform DER
 openssl x509 -in SHIM.crt -out SHIM.cer -outform DER
 
-if ls myGUID.txt 1 > /dev/null 2>&1; then
-    GUID=`cat myGUID.txt`
-else
-    GUID=`python -c 'import uuid; print(str(uuid.uuid1()))'`
-    echo $GUID > myGUID.txt
-fi
+GUID=`python -c 'import uuid; print(str(uuid.uuid1()))'`
+echo $GUID > myGUID.txt
 
 ./cert-to-efi-sig-list -g $GUID PK.crt PK.esl
 ./cert-to-efi-sig-list -g $GUID KEK.crt KEK.esl
@@ -44,6 +40,8 @@ touch noPK.esl
 chmod 0600 *.key
 
 make LockDown.efi
+
+# Add dummy signature to LockDown to allow booting with SecureBoot enabled with no keys installed
 sbsign --key DB.key --cert DB.crt --output LockDown-signed.efi LockDown.efi 2>/dev/null
 
 mv *.key ../keys

@@ -137,7 +137,8 @@ For compiling the SHIM it must have access to `SHIM.cer` which will be compiled 
 
 ```
 cd xen-uefi/shim
-make ARCH=x86_64 EFI_INCLUDE=/usr/include/efi EFI_PATH=/usr/lib VENDOR_CERT_FILE=../keys/SHIM.cer KEEP_DISCARDABLE_RELOC=1 DEFAULT_LOADER=xen-signed.efi```
+make ARCH=x86_64 EFI_INCLUDE=/usr/include/efi EFI_PATH=/usr/lib VENDOR_CERT_FILE=../keys/SHIM.cer KEEP_DISCARDABLE_RELOC=1 DEFAULT_LOADER=xen-signed.efi
+```
 
 Signing the resulting SHIM is performed with
 ```

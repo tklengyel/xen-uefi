@@ -127,7 +127,7 @@ Shim is used to cause Xen to verify DOM0 before launching it.  Shim installs an 
 # 5. Shim setup <a name="section-5"></a> 
 ## Compile and sign SHIM
 ------------------------------
-We will use a slightly modified version of the SHIM that can keep the `.reloc` section of the image it loads in memory (ie. `KEEP_DISCARDABLE_RELOC=1`). This is necessary for Xen as Xen looks for the `.reloc` section but by default the SHIM doesn't copy it if it's marked discardable.
+We will use a slightly modified version of the SHIM that can keep the `.reloc` section of the image it loads in memory (ie. `KEEP_DISCARDABLE_RELOC=1`). This is necessary for Xen as Xen looks for the `.reloc` section but by default the SHIM doesn't copy it if it's marked discardable. Also, there is a new shim ABI that allows us to measure arbitrary buffers into the TPM via the shim lock protocol.
 
 The SHIM will be signed with `DB.key` and will automatically launch `xen-signed.efi` provided it is properly signed with `SHIM.key`.
 
@@ -152,34 +152,22 @@ The default loader specified when the SHIM was compiled needs to be signed by th
 ------------------------------
 The SHIM needs to be installed on the Efi System Partition (`ESP`), alongside the default loader it will execute. Assume the partition is mounted at `/boot/efi`:
 
-`/boot/efi/EFI/BOOT/BOOTX64.EFI`.
-
-By using the above path for the SHIM, it will always execute, whether there is a specific boot entry set for it or if the system is being booted from the disk itself.
+`/boot/efi/EFI/xen/shim.efi`.
 
 Adding a boot entry can be performed with:
 ```
-efibootmgr -c -d /dev/sda -p 1 -w -L shim -l \EFI\BOOT\BOOTX64.EFI
+efibootmgr -c -d /dev/sda -p 1 -w -L "Xen" -l \EFI\xen\shim.efi
 ```
 
 # 6. Setup Xen <a name="section-6"></a> 
-## Compile Xen with required config options
-By default the Xen Security Modules (XSM) policy and the Xen command-line arguments are being specified by the bootloader (GRUB). When booted in UEFI mode these options can be specified in the UEFI config file. However, in that case neither would get verified and thus the SecureBoot trust-chain would get broken. Thus it is necessary to compile both into the Xen UEFI binary itself.
+## Compile Xen with required patches
 
-The configuration options necessary to activate these features require an environmental flag to be present:
+There are two patches for Xen that need to be applied. The first patch adds support to Xen to properly understand EFI_LOAD_OPTIONs. This is necessary only if there are multiple sections in the Xen efi config file. The second patch adds support to Xen to take advantage of the new shim measure ABI, which will be used to measure into the TPM the Xen efi config file, initrd and the XSM policy. These patches apply to Xen 4.10.0 but could be backported as necessary.
 
-`export XEN_CONFIG_EXPERT=y`
-
-Then, the following options need to be enabled (adjust CMDLINE as appropriate):
 ```
-CONFIG_XSM=y
-CONFIG_FLASK=y
-CONFIG_XSM_POLICY=y
-CONFIG_CMDLINE="console=com1 dom0_mem=min:420M,max:420M,420M com1=115200,8n1,pci mbi-video vga=current flask=enforcing loglvl=debug guest_loglvl=debug ucode=-2"
-CONFIG_CMDLINE_OVERRIDE=y
+patch -p1 < 0001-xen-Add-EFI_LOAD_OPTION-support.patch
+patch -p1 < 0002-xen-shim-lock-measure.patch
 ```
-
-A sample configuration file can be found in the git repository at https://github.com/tklengyel/xen-uefi/blob/master/xen-4.9-config.
-
 
 ## Signing Xen with the SHIM key
 --------------------------------
@@ -193,82 +181,39 @@ Afterwards, copy `xen-signed.efi` into the `ESP` partition next to the SHIM (ie.
 -------------------------------
 Xen expects a configuration file to be present when booted as a UEFI application. By default it expects to be named the same as the Xen UEFI application with the `cfg` extension. However, when booted through the SHIM, it will need to be named what the SHIM is named with the `cfg` extension. For example, `BOOTX64.cfg`.
 
-The contents of the config file need to be:
+The Xen configuration file can specify multiple sections, so that it is possible to pre-define different boot options for the Xen and the dom0 kernel.
+
 ```
 [global]
-default=xen
+default=normal
 
-[xen]
-kernel=linux-signed.efi
+[normal]
+options=console=vga
+kernel=vmlinuz-4.8.0-41-generic-signed root=/dev/sda2 ro quiet console=hvc0
+ramdisk=initrd.img-4.8.0-41-generic
+
+[debug]
+options=console=vga,com1 com1=115200,8n1,pci iommu=verbose loglvl=all guest_loglvl=all
+kernel=vmlinuz-4.8.0-41-generic-signed root=/dev/sda2 ro quiet console=hvc0
+ramdisk=initrd.img-4.8.0-41-generic
 ```
 
-The config file will only specify the name of the dom0 kernel image, which will also need to be signed with the SHIM key.
-
+To allow choosing between these sections during boot, specify the section name as the EFI_LOAD_OPTION's option field:
+```
+efibootmgr -c -d /dev/sda -p 1 -w -L "Xen (normal)" -l \EFI\xen\shim.efi -u "normal"
+efibootmgr -c -d /dev/sda -p 1 -w -L "Xen (debug)" -l \EFI\xen\shim.efi -u "debug"
+```
 # 7. dom0 setup <a name="section-7"></a> 
-## Compile Linux
--------------------------------
-To ensure the the initial ramdisk gets validated during boot it has be compiled into the Linux image itself. This requires first generating the kernel image and the corresponding ramdisk, then re-compiling the kernel image with the ramdisk embedded. The easiest way to do that is by creating the Debian packages for the kernel and actually installing the package to trigger the Debian initramfs hooks.
-
-**Warning: this setup assumes that the target system will have the same system environment as the one being used for building.**
-
-
-### From scratch
+## Sign and install
+Most kernels shipping with Debian or Ubuntu will "just work", but to ensure, check that the following options are enabled in the kernel config file:
 ```
-wget https://git.kernel.org/torvalds/t/linux-4.14-rc3.tar.gz
-tar xvf linux-4.14-rc3.tar.gz
-cp /boot/config-4.9.0-3-amd64 .config
-make oldconfig # choosing all default options is fine
-make -j8 deb-pkg
-
-sudo dpkg -i ../linux-image-4.14.0-rc3_4.14.0-rc3-1_amd64.deb
-mkdir initramfs
-cd initramfs
-zcat /boot/initrd.img-4.14.0-rc3 | cpio -idmv
-# make changes if needed, such as adding the udev rule for non-sda named disks
-cd ..
-sudo apt-get remove linux-image-4.14.0-rc3
-```
-
-Ensure config has the following options enabled
-```
-CONFIG_BLK_DEV_INITRD=y
-CONFIG_INITRAMFS_SOURCE="initramfs"
-CONFIG_INITRAMFS_ROOT_UID=1000 # <--- make sure it matches current owner of the initramfs folder
-CONFIG_INITRAMFS_ROOT_GID=1000 # <--- make sure it matches current owner of the initramfs folder
-CONFIG_CMDLINE_BOOL=y
-CONFIG_CMDLINE_OVERRIDE=y
-CONFIG_CMDLINE="console=hvc0 root=/dev/mapper/xenclient-root ro boot=/dev/mapper/xenclient-boot swiotlb=16384 xen_pciback.passthrough=1 consoleblank=0 video.delay_init=1 vt.global_cursor_default=0 rootfstype=ext3 bootfstype=ext3"
 CONFIG_EFI=y
 CONFIG_EFI_STUB=y
 CONFIG_FB_EFI=y
 ```
 
-Recompile
-```
-make -j8 bzImage
-```
+To sign the the kernel:
 
-### From pre-defined config file in git
-There is an example config file in the git repository as well that has the options already enabled.
+```sbsign --key SHIM.key --cert SHIM.crt --output vmlinuz-4.8.0-41-generic-signed vmlinuz-4.8.0-41-generic```
 
-```
-git clone https://github.com/tklengyel/xen-uefi
-wget https://git.kernel.org/torvalds/t/linux-4.14-rc3.tar.gz
-tar xvf linux-4.14-rc3.tar.gz
-cp xen-uefi/config-4.14.0 .config
-make -j8 deb-pkg
-sudo dpkg -i ../linux-image-4.14.0-rc3_4.14.0-rc3-1_amd64.deb
-mkdir initramfs
-cd initramfs
-zcat /boot/initrd.img-4.14.0-rc3 | cpio -idmv
-cd ..
-sudo apt-get remove linux-image-4.14.0-rc3
-make -j8 bzImage
-```
-
-The result Linux bzImage of the Linux kernel will be a valid EFI binary. It is also recommended to enable to enable [Linux Kernel Module Signing](https://www.kernel.org/doc/html/v4.10/admin-guide/module-signing.html).
-
-## Sign and install
-```sbsign --key SHIM.key --cert SHIM.crt --output linux-signed.efi arch/x86_64/boot/bzImage```
-
-Afterwards, copy `linux-signed.efi` into the `ESP` partition next to the SHIM (ie. `/boot/efi/EFI/xen/`). DO NOT create a UEFI boot entry for Linux as it can only be booted through the SHIM.
+Afterwards, copy the signed kernel and its initrd  into the `ESP` partition next to the SHIM (ie. `/boot/efi/EFI/xen/`).

@@ -1,14 +1,17 @@
-From 4b56bb3332b8ca0d26ee767c3330b88e6d7639b9 Mon Sep 17 00:00:00 2001
+From 89bb42087d83f1817245083da19331dd03efc727 Mon Sep 17 00:00:00 2001
 From: Tamas K Lengyel <tamas@tklengyel.com>
-Date: Fri, 26 Jan 2018 20:51:38 -0700
-Subject: [PATCH 2/2] Add support for shim lock measure
+Date: Fri, 2 Feb 2018 17:39:56 -0700
+Subject: [PATCH 2/4] Shim lock measure
 
+Support measuring critical components into the TPM using shim_lock->Measure
+
+Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
 ---
- xen/common/efi/boot.c | 33 +++++++++++++++++++++++++++++----
- 1 file changed, 29 insertions(+), 4 deletions(-)
+ xen/common/efi/boot.c | 75 +++++++++++++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 70 insertions(+), 5 deletions(-)
 
 diff --git a/xen/common/efi/boot.c b/xen/common/efi/boot.c
-index 3537fe9588..907180c43c 100644
+index 0772ba1c93..6a0951568c 100644
 --- a/xen/common/efi/boot.c
 +++ b/xen/common/efi/boot.c
 @@ -46,8 +46,17 @@ typedef EFI_STATUS
@@ -29,7 +32,40 @@ index 3537fe9588..907180c43c 100644
  } EFI_SHIM_LOCK_PROTOCOL;
  
  struct _EFI_APPLE_PROPERTIES;
-@@ -1105,7 +1114,7 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+@@ -1095,6 +1104,32 @@ static int __init __maybe_unused set_color(u32 mask, int bpp, u8 *pos, u8 *sz)
+    return max(*pos + *sz, bpp);
+ }
+ 
++static bool secureboot_enabled(void)
++{
++    EFI_GUID efi_gv = EFI_GLOBAL_VARIABLE;
++    UINT8 SecureBoot = 0, SetupMode = 0;
++    UINTN DataSize = sizeof(SecureBoot);
++    EFI_STATUS efi_status;
++
++    efi_status = efi_rs->GetVariable(L"SecureBoot", &efi_gv, NULL,
++                                     &DataSize, &SecureBoot);
++    if ( EFI_ERROR(efi_status) )
++        return false;
++
++    if ( !SecureBoot )
++        return false;
++
++    efi_status = efi_rs->GetVariable(L"SetupMode", &efi_gv, NULL,
++                                     &DataSize, &SetupMode);
++    if ( EFI_ERROR(efi_status) )
++        return false;
++
++    if ( SetupMode )
++        return false;
++
++    return true;
++}
++
+ void EFIAPI __init noreturn
+ efi_start(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+ {
+@@ -1105,7 +1140,7 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
      unsigned int i, argc;
      CHAR16 **argv, *file_name, *cfg_file_name = NULL, *options = NULL;
      UINTN gop_mode = ~0;
@@ -37,8 +73,8 @@ index 3537fe9588..907180c43c 100644
 +    EFI_SHIM_LOCK_PROTOCOL *shim_lock = NULL;
      EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
      union string section = { NULL }, name;
-     bool base_video = false, elo_active = false;
-@@ -1225,6 +1234,13 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+     bool_t base_video = 0;
+@@ -1225,6 +1260,13 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
          }
          else if ( !read_file(dir_handle, cfg_file_name, &cfg, NULL) )
              blexit(L"Configuration file not found.");
@@ -46,43 +82,58 @@ index 3537fe9588..907180c43c 100644
 +        efi_bs->LocateProtocol(&shim_lock_guid, NULL, (void **)&shim_lock);
 +
 +        if ( shim_lock &&
-+            (status = shim_lock->Measure(cfg.ptr, cfg.size, 4)) != EFI_SUCCESS )
++            (status = shim_lock->Measure(cfg.ptr, cfg.size, 8)) != EFI_SUCCESS )
 +                PrintErrMesg(L"Configuration file could not be measured", status);
 +
          pre_parse(&cfg);
  
          if ( section.w )
-@@ -1262,9 +1278,8 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+@@ -1262,16 +1304,34 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
          read_file(dir_handle, s2w(&name), &kernel, option_str);
          efi_bs->FreePool(name.w);
  
 -        if ( !EFI_ERROR(efi_bs->LocateProtocol(&shim_lock_guid, NULL,
 -                        (void **)&shim_lock)) &&
 -             (status = shim_lock->Verify(kernel.ptr, kernel.size)) != EFI_SUCCESS )
-+        if ( shim_lock &&
-+            (status = shim_lock->Verify(kernel.ptr, kernel.size)) != EFI_SUCCESS )
-             PrintErrMesg(L"Dom0 kernel image could not be verified", status);
+-            PrintErrMesg(L"Dom0 kernel image could not be verified", status);
++        if ( shim_lock )
++        {
++            if ( secureboot_enabled() )
++            {
++                if ( (status = shim_lock->Verify(kernel.ptr, kernel.size))
++                    != EFI_SUCCESS )
++                    PrintErrMesg(L"Dom0 kernel image could not be verified",
++                                 status);
++            }
++            else
++            {
++                if ( (status = shim_lock->Measure(kernel.ptr, kernel.size, 4))
++                    != EFI_SUCCESS )
++                    PrintErrMesg(L"Dom0 kernel image could not be measured",
++                                 status);
++            }
++        }
  
          name.s = get_value(&cfg, section.s, "ramdisk");
-@@ -1272,6 +1287,11 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+         if ( name.s )
          {
              read_file(dir_handle, s2w(&name), &ramdisk, NULL);
              efi_bs->FreePool(name.w);
 +
 +            if ( shim_lock &&
-+                (status = shim_lock->Measure(ramdisk.ptr, ramdisk.size, 4))
++                (status = shim_lock->Measure(ramdisk.ptr, ramdisk.size, 8))
 +                 != EFI_SUCCESS )
 +                    PrintErrMesg(L"ramdisk could not be measured", status);
          }
  
          name.s = get_value(&cfg, section.s, "xsm");
-@@ -1279,6 +1299,11 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+@@ -1279,6 +1339,11 @@ efi_start(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
          {
              read_file(dir_handle, s2w(&name), &xsm, NULL);
              efi_bs->FreePool(name.w);
 +
 +            if ( shim_lock &&
-+                (status = shim_lock->Measure(xsm.ptr, xsm.size, 4))
++                (status = shim_lock->Measure(xsm.ptr, xsm.size, 8))
 +                 != EFI_SUCCESS)
 +                    PrintErrMesg(L"XSM policy could not be measured", status);
          }

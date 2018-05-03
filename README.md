@@ -1,4 +1,4 @@
-This repository contains tools and instructions for installing Xen and dom0 with UEFI/SecureBoot such that all critical components of Xen and the dom0 kernel get SecureBoot verified and measured into the TPM.
+This repository contains tools and instructions for installing Xen and dom0 with UEFI/SecureBoot + Intel TXT such that all critical components of Xen and the dom0 kernel get SecureBoot verified and measured into the TPM. The setup described here combines a full SRTM chain with DRTM measurements at the end.
 
 # Table of Contents
 1. [Generating SecureBoot signing keys](#section-1)
@@ -162,12 +162,27 @@ efibootmgr -c -d /dev/sda -p 1 -w -L "Xen" -l \EFI\xen\shim.efi
 # 6. Setup Xen <a name="section-6"></a> 
 ## Compile Xen with required patches
 
-There are two patches for Xen that need to be applied. The first patch adds support to Xen to properly understand EFI_LOAD_OPTIONs. This is necessary only if there are multiple sections in the Xen efi config file. The second patch adds support to Xen to take advantage of the new shim measure ABI, which will be used to measure into the TPM the Xen efi config file, initrd and the XSM policy. These patches apply to Xen 4.10.0 but could be backported as necessary.
+There are three patches for Xen that need to be applied. The first patch adds support to Xen to properly understand EFI_LOAD_OPTIONs. This is necessary only if there are multiple sections in the Xen efi config file. The second patch adds support to Xen to take advantage of the new shim measure ABI, which will be used to measure into the TPM the Xen efi config file, initrd and the XSM policy. These patches apply to Xen 4.10.0 but could be backported as necessary.
 
 ```
-patch -p1 < 0001-xen-Add-EFI_LOAD_OPTION-support.patch
-patch -p1 < 0002-xen-shim-lock-measure.patch
+patch -p1 < xen-0001-Add-EFI_LOAD_OPTION-support.patch
+patch -p1 < xen-0002-shim-lock-measure.patch
+patch -p1 < xen-0003-Measure-and-Launch-tboot-from-Xen-efi-loader.patch
 ```
+
+## Compile tboot with required patches
+If the system supports Intel TXT, it is possible to include DRTM measurements of Xen as well using tboot. There are two patches that need to be applied on tboot 1.9.6 to enable it loading PE files.
+
+```
+patch -p1 < tboot-0001-Find-e820-regions-that-include-the-limit.patch
+patch -p1 < tboot-0002-Add-support-for-launching-64-bit-PE-kernels.patch
+```
+
+Copy the resulting tboot (uncompressed) onto the ESP:
+
+`/boot/efi/EFI/xen/tboot`
+
+You will also have to copy the system's SINIT module (uncompressed) to the ESP. You can find the SINIT modules at https://software.intel.com/en-us/articles/intel-trusted-execution-technology. 
 
 ## Signing Xen with the SHIM key
 --------------------------------
@@ -181,7 +196,7 @@ Afterwards, copy `xen-signed.efi` into the `ESP` partition next to the SHIM (ie.
 -------------------------------
 Xen expects a configuration file to be present when booted as a UEFI application. By default it expects to be named the same as the Xen UEFI application with the `cfg` extension. However, when booted through the SHIM, it will need to be named what the SHIM is named with the `cfg` extension. For example, `BOOTX64.cfg`.
 
-The Xen configuration file can specify multiple sections, so that it is possible to pre-define different boot options for the Xen and the dom0 kernel.
+The Xen configuration file can specify multiple sections, so that it is possible to pre-define different boot options for the Xen and the dom0 kernel. The tboot/sinit lines are only needed if the system supports Intel TXT.
 
 ```
 [global]
@@ -191,11 +206,15 @@ default=normal
 options=console=vga
 kernel=vmlinuz-4.8.0-41-generic-signed root=/dev/sda2 ro quiet console=hvc0
 ramdisk=initrd.img-4.8.0-41-generic
+tboot=tboot
+sinit=sinit.bin
 
 [debug]
 options=console=vga,com1 com1=115200,8n1,pci iommu=verbose loglvl=all guest_loglvl=all
 kernel=vmlinuz-4.8.0-41-generic-signed root=/dev/sda2 ro quiet console=hvc0
 ramdisk=initrd.img-4.8.0-41-generic
+tboot=tboot loglvl=all
+sinit=sinit.bin
 ```
 
 To allow choosing between these sections during boot, specify the section name as the EFI_LOAD_OPTION's option field:

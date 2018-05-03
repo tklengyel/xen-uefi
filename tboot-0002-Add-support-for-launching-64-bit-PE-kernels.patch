@@ -1,0 +1,619 @@
+From 81b8ba184b5ea9fd1fdfb58ed4ea509fdb5ba03d Mon Sep 17 00:00:00 2001
+From: Daniel De Graaf <dgdegra@tycho.nsa.gov>
+Date: Tue, 27 Feb 2018 13:10:07 -0500
+Subject: [PATCH 2/2] Add support for launching 64-bit PE kernels
+
+This is currently used by xen.efi when booting via EFI
+
+Signed-off-by: Daniel De Graaf <dgdegra@tycho.nsa.gov>
+---
+ tboot/Makefile           |   1 +
+ tboot/common/linux.c     |  37 ++++++++
+ tboot/common/loader.c    |  30 ++++++-
+ tboot/common/paging_64.c | 224 +++++++++++++++++++++++++++++++++++++++++++++++
+ tboot/common/pe.c        | 221 ++++++++++++++++++++++++++++++++++++++++++++++
+ tboot/include/paging.h   |   1 +
+ 6 files changed, 511 insertions(+), 3 deletions(-)
+ create mode 100644 tboot/common/paging_64.c
+ create mode 100644 tboot/common/pe.c
+
+diff --git a/tboot/Makefile b/tboot/Makefile
+index d5fbd24..b0050f1 100644
+--- a/tboot/Makefile
++++ b/tboot/Makefile
+@@ -21,6 +21,7 @@ obj-y += common/policy.o common/printk.o common/rijndael.o common/sha1.o
+ obj-y += common/strcmp.o common/strlen.o common/strncmp.o common/strncpy.o
+ obj-y += common/strtoul.o common/tb_error.o common/tboot.o common/tpm.o
+ obj-y += common/vga.o common/vmac.o common/vsprintf.o common/lz.o
++obj-y += common/pe.o common/paging_64.o
+ obj-y += txt/acmod.o txt/errors.o txt/heap.o txt/mtrrs.o txt/txt.o
+ obj-y += txt/verify.o txt/vmcs.o
+ obj-y += common/tpm_12.o common/tpm_20.o 
+diff --git a/tboot/common/linux.c b/tboot/common/linux.c
+index 5bfe7c2..14dfc27 100644
+--- a/tboot/common/linux.c
++++ b/tboot/common/linux.c
+@@ -77,6 +77,43 @@ printk_long(const char *what)
+     }
+ }
+ 
++bool is_linux_image(const void *linux_image, size_t linux_size)
++{
++    linux_kernel_header_t *hdr;
++
++    if ( linux_image == NULL ) {
++        printk(TBOOT_ERR"Error: Linux kernel image is zero.\n");
++        return false;
++    }
++
++    if ( linux_size == 0 ) {
++        printk(TBOOT_ERR"Error: Linux kernel size is zero.\n");
++        return false;
++    }
++
++    if ( linux_size < sizeof(linux_kernel_header_t) + KERNEL_HEADER_OFFSET ) {
++        printk(TBOOT_INFO"Error: Linux kernel size is too small.\n");
++        return false;
++    }
++
++    hdr = (linux_kernel_header_t *)(linux_image + KERNEL_HEADER_OFFSET);
++
++    /* compare to the magic number */
++    if ( hdr->header != HDRS_MAGIC ) {
++        /* could still be an old kernel, but that's not supported */
++        printk(TBOOT_WARN"Linux magic number not found, image is not Linux or is too old.\n");
++        return false;
++    }
++
++    if ( hdr->version < 0x0205 ) {
++        printk(TBOOT_WARN
++               "Error: Old kernel (<2.6.20) is not supported by tboot.\n");
++        return false;
++    }
++
++    return true;
++}
++
+ /* expand linux kernel with kernel image and initrd image */
+ bool expand_linux_image(const void *linux_image, size_t linux_size,
+                         const void *initrd_image, size_t initrd_size,
+diff --git a/tboot/common/loader.c b/tboot/common/loader.c
+index cb38ceb..40f10c4 100644
+--- a/tboot/common/loader.c
++++ b/tboot/common/loader.c
+@@ -69,10 +69,14 @@ extern loader_ctx *g_ldr_ctx;
+ extern bool get_elf_image_range(const elf_header_t *elf, void **start, void **end);
+ extern bool is_elf_image(const void *image, size_t size);
+ extern bool expand_elf_image(const elf_header_t *elf, void **entry_point);
++extern bool is_pe_image(const void *image, size_t size);
++extern bool expand_pe_image(const void *image);
++extern bool is_linux_image(const void *image, size_t size);
+ extern bool expand_linux_image(const void *linux_image, size_t linux_size,
+                                const void *initrd_image, size_t initrd_size,
+                                void **entry_point, bool is_measured_launch);
+ extern bool jump_elf_image(const void *entry_point, uint32_t magic);
++extern bool jump_pe_image(void);
+ extern bool jump_linux_image(const void *entry_point);
+ extern bool is_sinit_acmod(const void *acmod_base, uint32_t acmod_size, 
+                            bool quiet);
+@@ -1351,7 +1355,7 @@ determine_multiboot_type(void *image)
+ 
+ bool launch_kernel(bool is_measured_launch)
+ {
+-    enum { ELF, LINUX } kernel_type;
++    enum { ELF, LINUX, PE } kernel_type;
+ 
+     void *kernel_entry_point;
+     uint32_t mb_type = MB_NONE;
+@@ -1424,10 +1428,18 @@ bool launch_kernel(bool is_measured_launch)
+         if(!move_modules_to_high_memory(g_ldr_ctx))
+             return false;
+     }
+-    else {
+-        printk(TBOOT_INFO"assuming kernel is Linux format\n");
++    else if ( is_linux_image(kernel_image, kernel_size) ) {
++        printk(TBOOT_INFO"kernel is Linux format\n");
+         kernel_type = LINUX;
+     }
++    else if ( is_pe_image(kernel_image, kernel_size) ) {
++        printk(TBOOT_INFO"kernel is PE format\n");
++        kernel_type = PE;
++    }
++    else {
++        printk(TBOOT_ERR"unknown kernel type\n");
++        return false;
++    }
+ 
+     /* print_mbi(g_mbi); */
+ 
+@@ -1455,6 +1467,18 @@ bool launch_kernel(bool is_measured_launch)
+                               mb_type == MB1_ONLY ?
+                               MB_MAGIC : MB2_LOADER_MAGIC);
+     }
++    else if ( kernel_type == PE ) {
++        if ( is_measured_launch )
++            adjust_kernel_cmdline(g_ldr_ctx, &_tboot_shared);
++        if ( !expand_pe_image(kernel_image) )
++            return false;
++
++        printk(TBOOT_INFO"transfering control to kernel...\n");
++        /* (optionally) pause when transferring to kernel */
++        if ( g_vga_delay > 0 )
++            delay(g_vga_delay * 1000);
++        return jump_pe_image();
++    }
+     else if ( kernel_type == LINUX ) {
+         void *initrd_image;
+         size_t initrd_size;
+diff --git a/tboot/common/paging_64.c b/tboot/common/paging_64.c
+new file mode 100644
+index 0000000..39b8422
+--- /dev/null
++++ b/tboot/common/paging_64.c
+@@ -0,0 +1,224 @@
++/*
++ * paging_64.c: Enable 64-bit paging and jump to PE entry points
++ */
++
++#include <stdbool.h>
++#include <types.h>
++#include <compiler.h>
++#include <printk.h>
++#include <processor.h>
++#include <tb_error.h>
++#include <paging.h>
++#include <misc.h>
++#include <msr.h>
++#include <string.h>
++#include <uuid.h>
++#include <loader.h>
++
++#define __page __attribute__ ((__section__ (".bss.page_aligned"),aligned(4096)))
++
++static uint64_t __page pml4[512];
++static uint64_t __page pml3_low[512];
++static uint64_t __page pml3_kernel[512];
++
++static uint64_t __page pml2_low[512 * 4]; // Identity mapping of all memory < 4G
++static uint64_t __page pml2_kernel[512];  // Mapping of the kernel's entry point
++
++/* Private lanuch information structure */
++struct pe_data {
++    uint64_t entry;
++    uint64_t rcx;
++    uint64_t rdx;
++};
++
++/* Public structure provided to PE entry function */
++struct tboot_table {
++    char magic[8];
++    uint64_t phys_start;
++};
++
++static struct pe_data pe_data;
++
++static struct tboot_table tboot_table = {
++    .magic = "TBOOT_PE"
++};
++
++static uint64_t mk_table(void* table)
++{
++    return ((uint64_t)(uint32_t)table) | _PAGE_PRESENT | _PAGE_RW | _PAGE_A;
++}
++
++static inline int pml4_slot(uint64_t addr)
++{
++    return (addr >> 39) & 0x1FF;
++}
++
++static inline int pml3_slot(uint64_t addr)
++{
++    return (addr >> 30) & 0x1FF;
++}
++
++static inline int pml2_slot(uint64_t addr)
++{
++    return (addr >> 21) & 0x1FF;
++}
++
++#define PML2_MASK (((1 << 21) - 1))
++
++bool setup_pml4(uint64_t virtual_base, uint32_t load_addr, uint32_t load_size, uint64_t entry)
++{
++    uint64_t virtual_end = virtual_base + load_size;
++    uint32_t pml2_start = pml2_slot(virtual_base);
++    uint32_t pml2_slots = 1 + ((load_size - 1) >> 21);
++    uint32_t i;
++
++    if ( virtual_base < (1ULL << 39) ) {
++        // This would make pml3_kernel and pml3_low overlap
++        printk(TBOOT_ERR "Cannot map PE kernel below 512GB\n");
++        return false;
++    }
++
++    if ( load_size >= (1 << 30) ) {
++        // Requires more than one page for pml2_kernel
++        printk(TBOOT_ERR "Virtual layouts larger than 1GB not supported\n");
++        return false;
++    }
++
++    if ( virtual_base & PML2_MASK ) {
++        printk(TBOOT_ERR "Virtual layouts must be 2MB-aligned\n");
++        return false;
++    }
++
++    if ( load_addr & PML2_MASK ) {
++        printk(TBOOT_ERR "Physical addresses must be 2MB-aligned\n");
++        return false;
++    }
++
++    tboot_table.phys_start = load_addr;
++    pe_data.entry = entry;
++
++    // Always map the lower 4G as 1:1
++    pml4[pml4_slot(0)] = mk_table(pml3_low);
++
++    for( i = 0; i < 4; i++ )
++        pml3_low[i] = mk_table(&pml2_low[i * 512]);
++
++    for( i = 0; i < 512*4; i++ )
++        pml2_low[i] = MAKE_TB_PDE(i << 21);
++
++    /* Map the kernel's virtual address space.  If (slot) wraps around in the
++     * loop below, there will be duplicate mappings created outside the
++     * contiguous mapping, but that is harmless.
++     */
++    pml4[pml4_slot(virtual_base)] = mk_table(pml3_kernel);
++    pml4[pml4_slot(virtual_end)] = mk_table(pml3_kernel);
++
++    pml3_kernel[pml3_slot(virtual_base)] = mk_table(pml2_kernel);
++    pml3_kernel[pml3_slot(virtual_end)] = mk_table(pml2_kernel);
++
++    for( i = 0; i < pml2_slots; i++ ) {
++        uint32_t slot = (pml2_start + i) & 0x1FF;
++        uint32_t addr = load_addr + (i << 21);
++        pml2_kernel[slot] = MAKE_TB_PDE(addr);
++    }
++
++    return true;
++}
++
++void jump_pe_image(void)
++{
++#define __BOOT_CS64    0x10
++#define __BOOT_DS64    0x18
++    static const uint64_t gdt_table[] __attribute__ ((aligned(16))) = {
++        0,
++        0,
++        0x00af9b000000ffff,     /* cs64 */
++        0x00cf93000000ffff      /* ds64 */
++    };
++    /* both 4G flat, CS: execute/read, DS: read/write */
++
++    static struct __packed {
++        uint16_t  length;
++        uint32_t  table;
++    } gdt_desc;
++
++    gdt_desc.length = sizeof(gdt_table) - 1;
++    gdt_desc.table = (uint32_t)&gdt_table;
++
++    pe_data.rcx = (uint32_t)g_ldr_ctx->addr;
++    pe_data.rdx = (uint32_t)&tboot_table;
++
++    asm volatile(
++    // Disable paging
++     "mov %[cr0_nopg], %%eax\n"
++     "mov %%eax, %%cr0\n"
++
++    // Load the GDT that we'll use later to enter 64-bit mode
++     "lgdtl %[gdt]\n"
++
++    // Enable PAE
++     "mov %[cr4], %%eax\n"
++     "mov %%eax, %%cr4\n"
++
++    // Load our page tables
++     "mov %[pml4], %%eax\n"
++     "mov %%eax, %%cr3\n"
++
++    // Enable IA-32e mode (clobbers eax/edx)
++     "mov %[efer], %%ecx\n"
++     "rdmsr\n"
++     "or %[lme], %%eax\n"
++     "wrmsr\n"
++
++    // Enable paging (now using the 1:1 map from pml2_low)
++     "mov %[cr0], %%eax\n"
++     "mov %%eax, %%cr0\n"
++
++    // Jump to enter 64-bit mode (mov to cs)
++     "ljmp %[cs64], $(1f)\n"
++     ".code64\n"
++     "1:\n"
++
++    // Load the other segment registers
++     "mov %[ds64], %%ecx\n"
++     "mov %%ecx, %%ds\n"
++     "mov %%ecx, %%es\n"
++     "mov %%ecx, %%fs\n"
++     "mov %%ecx, %%gs\n"
++     "mov %%ecx, %%ss\n"
++
++    // Align the stack
++     "andq $-16, %%rsp\n"
++
++    // Load 64-bit values into argument registers
++     "movq 8(%%esi), %%rcx\n"
++     "movq 16(%%esi), %%rdx\n"
++
++    // Jump to the entry point
++     "jmp *(%%esi)\n"
++
++    // Reset the ASM dialect so that later GCC code is correct
++     ".code32\n"
++    ::
++     [gdt] "m" (gdt_desc),
++     [pml4] "ri" (&pml4[0]),
++     [efer] "i" (MSR_EFER),
++     [lme] "i" (1 << _EFER_LME),
++     [cr0_nopg] "i" (CR0_PE | CR0_MP | CR0_NE),
++     [cr0] "i" (CR0_PE | CR0_MP | CR0_NE | CR0_PG),
++     [cr4] "i" (CR4_DE | CR4_PAE | CR4_MCE | CR4_FXSR | CR4_XMM | CR4_SMXE),
++     [ds64] "i" (__BOOT_DS64),
++     [cs64] "i" (__BOOT_CS64),
++     "S" (&pe_data)
++     : "eax");
++}
++/*
++ * Local variables:
++ * mode: C
++ * c-set-style: "BSD"
++ * c-basic-offset: 4
++ * tab-width: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
++
+diff --git a/tboot/common/pe.c b/tboot/common/pe.c
+new file mode 100644
+index 0000000..090d08e
+--- /dev/null
++++ b/tboot/common/pe.c
+@@ -0,0 +1,221 @@
++/*
++ * pe.c: support functions for manipulating PE binaries
++ */
++
++#include <config.h>
++#include <stdbool.h>
++#include <types.h>
++#include <printk.h>
++#include <compiler.h>
++#include <string.h>
++#include <uuid.h>
++#include <loader.h>
++#include <e820.h>
++
++extern loader_ctx *g_ldr_ctx;
++bool setup_pml4(uint64_t virtual_base, uint32_t load_addr, uint32_t load_size, uint64_t entry);
++
++struct PE_DOS_Header {
++    uint16_t signature;
++    uint16_t lastsize;
++    uint16_t nblocks;
++    uint16_t nreloc;
++    uint16_t hdrsize;
++    uint16_t minalloc;
++    uint16_t maxalloc;
++    uint16_t ss;
++    uint16_t sp;
++    uint16_t checksum;
++    uint16_t ip;
++    uint16_t cs;
++    uint16_t relocpos;
++    uint16_t noverlay;
++    uint16_t reserved1[4];
++    uint16_t oem_id;
++    uint16_t oem_info;
++    uint16_t reserved2[10];
++    uint32_t e_lfanew; // Offset to the 'PE\0\0' signature relative to the beginning of the file
++};
++
++struct PE_data_directory {
++    uint32_t VirtualAddress;
++    uint32_t Size;
++};
++
++struct PE_COFFHeader {
++    uint32_t signature;
++    uint16_t Machine;
++    uint16_t NumberOfSections;
++    uint32_t TimeDateStamp;
++    uint32_t PointerToSymbolTable;
++    uint32_t NumberOfSymbols;
++    uint16_t SizeOfOptionalHeader;
++    uint16_t Characteristics;
++
++    uint16_t opt_header[0];
++};
++
++struct PEOptHeader64 {
++    uint16_t signature; //decimal number 267 for 32 bit, 523 for 64 bit, and 263 for a ROM image. 
++    uint8_t MajorLinkerVersion; 
++    uint8_t MinorLinkerVersion;
++    uint32_t SizeOfCode;
++    uint32_t SizeOfInitializedData;
++    uint32_t SizeOfUninitializedData;
++    uint32_t AddressOfEntryPoint;  //The RVA of the code entry point
++    uint32_t BaseOfCode;
++    /*The next 21 fields are an extension to the COFF optional header format*/
++    uint64_t ImageBase;
++    uint32_t SectionAlignment;
++    uint32_t FileAlignment;
++    uint16_t MajorOSVersion;
++    uint16_t MinorOSVersion;
++    uint16_t MajorImageVersion;
++    uint16_t MinorImageVersion;
++    uint16_t MajorSubsystemVersion;
++    uint16_t MinorSubsystemVersion;
++    uint32_t Win32VersionValue;
++    uint32_t SizeOfImage;
++    uint32_t SizeOfHeaders;
++    uint32_t Checksum;
++    uint16_t Subsystem;
++    uint16_t DLLCharacteristics;
++    uint64_t SizeOfStackReserve;
++    uint64_t SizeOfStackCommit;
++    uint64_t SizeOfHeapReserve;
++    uint64_t SizeOfHeapCommit;
++    uint32_t LoaderFlags;
++    uint32_t NumberOfRvaAndSizes;
++    struct PE_data_directory DataDirectory[16];
++};
++
++struct PE_SectionHeader {
++  char     Name[8];
++  uint32_t VirtualSize;
++  uint32_t VirtualAddress;
++  uint32_t SizeOfRawData;
++  uint32_t PointerToRawData;
++  uint32_t PointerToRelocations;
++  uint32_t PointerToLinenumbers;
++  uint16_t NumberOfRelocations;
++  uint16_t NumberOfLinenumbers;
++  uint32_t Characteristics;
++};
++
++#define PE_SECTION_CODE 0x00000020
++#define PE_SECTION_DATA 0x00000040
++#define PE_SECTION_BSS  0x00000080
++
++#define PE_SECTION_LOAD (PE_SECTION_CODE | PE_SECTION_DATA | PE_SECTION_BSS)
++
++bool is_pe_image(const void *image, size_t size)
++{
++    const struct PE_DOS_Header *dos_hdr = image;
++    const struct PE_COFFHeader *pe_hdr;
++
++    /* check size */
++    if ( sizeof(struct PE_DOS_Header) > size ) {
++        printk(TBOOT_ERR"Error: Image size is smaller than PE header size.\n");
++        return false;
++    }
++
++    if ( dos_hdr->signature != ('M' | ('Z' << 8)) ) {
++        printk(TBOOT_WARN"PE DOS magic number not matched, image is not PE format.\n");
++        return false;
++    }
++
++    if ( dos_hdr->e_lfanew + sizeof(struct PE_COFFHeader) > size ) {
++        printk(TBOOT_ERR"Error: Image size is smaller than COFF header.\n");
++        return false;
++    }
++
++    pe_hdr = image + dos_hdr->e_lfanew;
++
++    if ( pe_hdr->signature != ('P' | ('E' << 8)) ) {
++        printk(TBOOT_WARN"PE magic number not matched, image is not PE format.\n");
++        return false;
++    }
++
++    if ( pe_hdr->Machine == 0x8664 &&
++         pe_hdr->SizeOfOptionalHeader == sizeof(struct PEOptHeader64) &&
++         pe_hdr->opt_header[0] == 523 ) {
++
++        return true;
++    }
++
++    printk(TBOOT_WARN"PE COFF header is not a 64-bit PE.\n");
++    return false;
++}
++
++bool expand_pe_image(const void *image)
++{
++    const void* ptr = image;
++    const struct PE_DOS_Header *dos_hdr = image;
++    const struct PE_COFFHeader *pe_hdr;
++    const struct PEOptHeader64 *pe64;
++    const struct PE_SectionHeader *section;
++    int i;
++    uint32_t image_max = 0; // size when expanded
++    uint32_t load_base;
++    uint64_t entry, ram_base, ram_size;
++     
++    ptr += dos_hdr->e_lfanew;
++    pe_hdr = ptr;
++    ptr += sizeof(struct PE_COFFHeader);
++    pe64 = ptr;
++    ptr += sizeof(*pe64);
++    section = ptr;
++
++    entry = pe64->AddressOfEntryPoint;
++    entry += pe64->ImageBase;
++
++    for( i = 0; i < pe_hdr->NumberOfSections; i++ ) {
++        uint32_t attrs = section[i].Characteristics;
++
++        if ( attrs & PE_SECTION_LOAD ) {
++            uint32_t start = section[i].VirtualAddress;
++            uint32_t end = start + section[i].VirtualSize;
++            if ( image_max < end )
++                image_max = end; 
++        }
++    }
++
++    // Find a suitable region to expand the PE, and use the top
++
++    // XXX: This currently assumes that the PE image is loaded lowest in
++    // memory, and therefore it is safe to clobber memory below it as long
++    // as the e820 says it's RAM.
++    get_highest_sized_ram(image_max + (1 << 21), (u32)image,
++                          &ram_base, &ram_size);
++
++    if ( ram_size < image_max ) {
++        printk(TBOOT_ERR"Not enough memory to load kernel.\n");
++        return false;
++    }
++
++    if ( ram_base + ram_size > (u32)image )
++        load_base = (u32)image - image_max;
++    else
++        load_base = ram_base + ram_size - image_max;
++
++    // Round load_base down to the nearest 2MB; this is safe because we
++    // requested 2MB more than we needed
++    load_base &= ~((1 << 21) - 1);
++
++    printk(TBOOT_INFO"Loading PE at %x (%llx %llx)\n", load_base, ram_base, ram_size);
++
++    for( i = 0; i < pe_hdr->NumberOfSections; i++ ) {
++        uint32_t attrs = section[i].Characteristics;
++
++        if ( attrs & PE_SECTION_BSS ) {
++            uint32_t dest = load_base + section[i].VirtualAddress;
++            memset((void*)dest, 0, section[i].VirtualSize);
++        } else if ( attrs & PE_SECTION_LOAD ) {
++            const void* src = image + section[i].PointerToRawData;
++            uint32_t dest = load_base + section[i].VirtualAddress;
++            memcpy((void*)dest, src, section[i].VirtualSize);
++        }
++    }
++
++    return setup_pml4(pe64->ImageBase, load_base, image_max, entry);
++}
+diff --git a/tboot/include/paging.h b/tboot/include/paging.h
+index 7896824..76c5695 100644
+--- a/tboot/include/paging.h
++++ b/tboot/include/paging.h
+@@ -61,6 +61,7 @@
+ 
+ #define _PAGE_PRESENT                   0x01
+ #define _PAGE_RW			0x02
++#define _PAGE_A				0x20
+ #define _PAGE_SIZE			0x80
+ 
+ 
+-- 
+2.14.3
+

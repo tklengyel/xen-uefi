@@ -1,19 +1,24 @@
-From 81b8ba184b5ea9fd1fdfb58ed4ea509fdb5ba03d Mon Sep 17 00:00:00 2001
+From 6ff8811b03708ca369d371df74585eb55041db16 Mon Sep 17 00:00:00 2001
 From: Daniel De Graaf <dgdegra@tycho.nsa.gov>
 Date: Tue, 27 Feb 2018 13:10:07 -0500
-Subject: [PATCH 2/2] Add support for launching 64-bit PE kernels
+Subject: [PATCH] Add support for launching 64-bit PE kernels
 
-This is currently used by xen.efi when booting via EFI
+This is currently used by xen.efi when booting via EFI. Use
+is_linux_image in is_kernel_linux, otherwise Xen's PV guests
+are unable to run with PCI-passthrough due to the memory protection
+used by tboot (reserved vs unusable). Xen needs the memory to be
+marked unusable.
 
 Signed-off-by: Daniel De Graaf <dgdegra@tycho.nsa.gov>
+Signed-off-by: Tamas K Lengyel <lengyelt@ainfosec.com>
 ---
  tboot/Makefile           |   1 +
  tboot/common/linux.c     |  37 ++++++++
- tboot/common/loader.c    |  30 ++++++-
+ tboot/common/loader.c    |  32 ++++++-
  tboot/common/paging_64.c | 224 +++++++++++++++++++++++++++++++++++++++++++++++
  tboot/common/pe.c        | 221 ++++++++++++++++++++++++++++++++++++++++++++++
  tboot/include/paging.h   |   1 +
- 6 files changed, 511 insertions(+), 3 deletions(-)
+ 6 files changed, 512 insertions(+), 4 deletions(-)
  create mode 100644 tboot/common/paging_64.c
  create mode 100644 tboot/common/pe.c
 
@@ -78,7 +83,7 @@ index 5bfe7c2..14dfc27 100644
  bool expand_linux_image(const void *linux_image, size_t linux_size,
                          const void *initrd_image, size_t initrd_size,
 diff --git a/tboot/common/loader.c b/tboot/common/loader.c
-index cb38ceb..40f10c4 100644
+index cb38ceb..03e0876 100644
 --- a/tboot/common/loader.c
 +++ b/tboot/common/loader.c
 @@ -69,10 +69,14 @@ extern loader_ctx *g_ldr_ctx;
@@ -96,6 +101,15 @@ index cb38ceb..40f10c4 100644
  extern bool jump_linux_image(const void *entry_point);
  extern bool is_sinit_acmod(const void *acmod_base, uint32_t acmod_size, 
                             bool quiet);
+@@ -590,7 +594,7 @@ bool is_kernel_linux(void)
+     void *kernel_image = (void *)m->mod_start;
+     size_t kernel_size = m->mod_end - m->mod_start;
+ 
+-    return !is_elf_image(kernel_image, kernel_size);
++    return is_linux_image(kernel_image, kernel_size);
+ }
+ 
+ static bool 
 @@ -1351,7 +1355,7 @@ determine_multiboot_type(void *image)
  
  bool launch_kernel(bool is_measured_launch)
@@ -615,5 +629,5 @@ index 7896824..76c5695 100644
  
  
 -- 
-2.14.3
+2.14.2
 

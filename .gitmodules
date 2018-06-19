@@ -6,3 +6,6 @@
 	path = shim
 	url = https://github.com/tklengyel/shim
     ignore = dirty
+[submodule "gnu-efi"]
+	path = gnu-efi
+	url = https://github.com/tklengyel/gnu-efi

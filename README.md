@@ -18,7 +18,7 @@ Private keys generated for SecureBoot need to be protected at all times. For thi
 ## Generating SecureBoot keys on Debian (stretch)
 ------------------------------
 ```
-apt-get install make gcc libssl1.0-dev git gnu-efi sbsigntool libfile-slurp-perl
+apt-get install make gcc libssl1.0-dev git sbsigntool libfile-slurp-perl
 git clone https://github.com/tklengyel/xen-uefi --recursive
 cd xen-uefi
 ./mkkeys.sh
@@ -131,7 +131,7 @@ We will use a slightly modified version of the SHIM that can keep the `.reloc` s
 
 The SHIM will be signed with `DB.key` and will automatically launch `xen-signed.efi` provided it is properly signed with `SHIM.key`.
 
-Make sure the SecureBoot keys have been generated already as described above..
+Make sure the SecureBoot keys have been generated already as described above. For this version of the SHIM we need gnu-efi 3.0.6. If your distributions ships that just install it with your package manager, otherwise the `gnu-efi` submodule in this repository contains the required version you can compile and install from source.
 
 For compiling the SHIM it must have access to `SHIM.cer` which will be compiled into the binary. Signing the final binary can be performed on a separate machine that holds the SecureBoot keys.
 

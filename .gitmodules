@@ -9,3 +9,12 @@
 [submodule "gnu-efi"]
 	path = gnu-efi
 	url = https://github.com/tklengyel/gnu-efi
+    ignore = dirty
+[submodule "tboot"]
+	path = tboot
+	url = https://github.com/tklengyel/tboot
+    ignore = dirty
+[submodule "xen"]
+	path = xen
+	url = https://github.com/tklengyel/xen
+    ignore = dirty

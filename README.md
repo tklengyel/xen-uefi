@@ -162,21 +162,10 @@ efibootmgr -c -d /dev/sda -p 1 -w -L "Xen" -l \EFI\xen\shim.efi
 # 6. Setup Xen <a name="section-6"></a> 
 ## Compile Xen with required patches
 
-There are three patches for Xen that need to be applied. The first patch adds support to Xen to properly understand EFI_LOAD_OPTIONs. This is necessary only if there are multiple sections in the Xen efi config file. The second patch adds support to Xen to take advantage of the new shim measure ABI, which will be used to measure into the TPM the Xen efi config file, initrd and the XSM policy. These patches apply to Xen 4.10.0 but could be backported as necessary.
-
-```
-patch -p1 < xen-0001-Add-EFI_LOAD_OPTION-support.patch
-patch -p1 < xen-0002-shim-lock-measure.patch
-patch -p1 < xen-0003-Measure-and-Launch-tboot-from-Xen-efi-loader.patch
-```
+The xen submodule within this repository contains three additional patches to Xen. The first patch adds support to Xen to properly understand EFI_LOAD_OPTIONs. This is necessary only if there are multiple sections in the Xen efi config file. The second patch adds support to Xen to take advantage of the new shim measure ABI, which will be used to measure into the TPM the Xen efi config file, initrd and the XSM policy.
 
 ## Compile tboot with required patches
-If the system supports Intel TXT, it is possible to include DRTM measurements of Xen as well using tboot. There are two patches that need to be applied on tboot 1.9.6 to enable it loading PE files.
-
-```
-patch -p1 < tboot-0001-Find-e820-regions-that-include-the-limit.patch
-patch -p1 < tboot-0002-Add-support-for-launching-64-bit-PE-kernels.patch
-```
+If the system supports Intel TXT, it is possible to include DRTM measurements of Xen as well using tboot. The tboot submodule within this repository contains two additional patches to tboot 1.9.6. Running `make` within the repository will generate tboot.
 
 Copy the resulting tboot (uncompressed) onto the ESP:
 

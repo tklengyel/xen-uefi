@@ -195,14 +195,14 @@ default=normal
 options=console=vga
 kernel=vmlinuz-4.8.0-41-generic-signed root=/dev/sda2 ro quiet console=hvc0
 ramdisk=initrd.img-4.8.0-41-generic
-tboot=tboot
+tboot=tboot min_ram=0x2000000
 sinit=sinit.bin
 
 [debug]
 options=console=vga,com1 com1=115200,8n1,pci iommu=verbose loglvl=all guest_loglvl=all
 kernel=vmlinuz-4.8.0-41-generic-signed root=/dev/sda2 ro quiet console=hvc0
 ramdisk=initrd.img-4.8.0-41-generic
-tboot=tboot loglvl=all
+tboot=tboot min_ram=0x2000000 loglvl=all
 sinit=sinit.bin
 ```
 
